@@ -1,16 +1,13 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import sys
 import math
 import os
-import itertools
 
 import numpy as N
-import pyfits
+from astropy.io import fits
 
 """
-
-Version 1.3
 Take a set of projct spectra, and create 'Background files' which account
 for the projected gas from outlying spectra
 
@@ -19,10 +16,11 @@ Jeremy Sanders (2007)
 External dependencies:
  python: http://www.python.org/
  numpy:  http://numpy.scipy.org/
- pyfits: http://www.stsci.edu/resources/software_hardware/pyfits
+ astropy: https://www.astropy.org/
 
 Version 1.1 (2008-07-08): now copies RESPFILE and ANCRFILE header keywords
 Version 1.2 (2016-05-23): pyfits compatibility fixes
+Version 1.3 (2020-07-20): switches from pyfits, python2 -> astropy, python3)
 """
 
 def projectionVolume(R1, R2, y1, y2):
@@ -56,13 +54,13 @@ def autoGrouping(specfilelist, mincts=25):
     Ensures there are a minimum of mincts in each group in each spectrum
     """
 
-    print "Automatically grouping to have a minimum of %i counts" % mincts
+    print("Automatically grouping to have a minimum of %i counts" % mincts)
 
     # read in spectra into list
     numchans = None
     spectra = []
     for filename in specfilelist:
-        f = pyfits.open(filename)
+        f = fits.open(filename)
         spec = f['SPECTRUM'].data.field('COUNTS')
         if numchans is None:
             numchans = len(spec)
@@ -73,12 +71,12 @@ def autoGrouping(specfilelist, mincts=25):
 
     # now work out how wide to make each channel
     # the group for each channel
-    groups = N.zeros( (numchans,), 'int32' )
+    groups = N.zeros( (numchans,), N.int32 )
     # total counts in each group in each spectrum
-    grpcts = N.zeros( (len(spectra),), 'int32')
+    grpcts = N.zeros( (len(spectra),), N.int32 )
 
     groupno = 0
-    for chan in xrange(numchans):
+    for chan in range(numchans):
         groups[chan] = groupno
 
         # add on counts from new channel, and test to see whether the
@@ -101,12 +99,12 @@ def readGrouping(specfile):
     Also returns number of groups
     """
 
-    print "Reading grouping for spectrum", specfile
+    print("Reading grouping for spectrum", specfile)
 
     # group channels (starting from 1) to groups (starting from 0)
     grpmapping = []
 
-    f = pyfits.open(specfile)
+    f = fits.open(specfile)
     spechdu = f['SPECTRUM']
 
     channels = spechdu.data.field('CHANNEL')
@@ -114,7 +112,7 @@ def readGrouping(specfile):
     f.close()
 
     groupno = -1  # so start of next group begins with 0
-    for chan, grp in itertools.izip(channels, grps):
+    for chan, grp in zip(channels, grps):
         if grp == 1:
             groupno += 1
         grpmapping.append(groupno)
@@ -126,7 +124,7 @@ def readSpectrumGrouping(specfile, grpmapping):
     Returns spec normalised to BACKSCAL and EXPOSURE, errors, outer radius
     """
 
-    f = pyfits.open(specfile)
+    f = fits.open(specfile)
     spechdu = f['SPECTRUM']
     header = spechdu.header
     factor = header['EXPOSURE']
@@ -179,7 +177,7 @@ def readSpectrumGrouping(specfile, grpmapping):
 class Bundle(object):
     """General object for collecting attribute, value pairs."""
     def __init__(self, **args):
-        for name, val in args.iteritems():
+        for name, val in args.items():
             setattr(self, name, val)
 
     def copy(self):
@@ -188,7 +186,7 @@ class Bundle(object):
         """
 
         b = Bundle()
-        for name, val in self.__dict__.iteritems():
+        for name, val in self.__dict__.items():
             if name[0:2] != '__':
                 if isinstance(val, Bundle):
                     val = val.copy()
@@ -198,11 +196,11 @@ class Bundle(object):
 def readSpectra(prefix, suffix, minspec, numspecs, minradius):
     """Read in list of spectra."""
 
-    print "Reading input spectra"
+    print("Reading input spectra")
     spectra = []
 
     filenames = []
-    for num in xrange(minspec, minspec+numspecs):
+    for num in range(minspec, minspec+numspecs):
         filenames.append('%s%i%s' % (prefix, num, suffix))
 
     grouping = autoGrouping(filenames)
@@ -236,7 +234,7 @@ def readSpectra(prefix, suffix, minspec, numspecs, minradius):
 
         spectra.append(specinfo)
 
-    print "%i spectra read" % len(spectra)
+    print("%i spectra read" % len(spectra))
     return spectra
 
 def deprojectSpectra(spectra):
@@ -245,13 +243,13 @@ def deprojectSpectra(spectra):
     specpervol = [None]*len(spectra)
     specshape = spectra[0].spec.shape
 
-    for shellnum in xrange(len(spectra)-1, -1, -1):
+    for shellnum in range(len(spectra)-1, -1, -1):
 
         spec = spectra[shellnum]
 
         # calculate projected spectrum of outlying shells
         projspec = N.zeros(specshape, 'float64')
-        for outer in xrange(shellnum+1, len(spectra)):
+        for outer in range(shellnum+1, len(spectra)):
             vol = projectionVolume( spectra[outer].minradius,
                                     spectra[outer].maxradius,
                                     spec.minradius, spec.maxradius ) * 2
@@ -271,27 +269,6 @@ def deprojectSpectra(spectra):
         specpervol[shellnum] = deprojspec / thisvol
 
     return specpervol
-
-# This was supposed to do a better job at simulating spectra from originals and errors
-# def myFakeSpec(spec, err):
-#     orig = (spec / err)**2
-#     factor = (orig/spec)[0]
-
-#     orig = spec*factor
-#     out = []
-#     for ct in orig:
-#         if N.random.randint(0, 2) == 0:
-#             x = ct + 1
-#             while x > ct:
-#                 x = N.random.normal(ct, N.sqrt(ct-0.25))
-#         else:
-#             x = ct - 1
-#             while x < ct:
-#                 x = N.random.normal(ct, N.sqrt(ct+0.75)+1.)
-#         out.append( x / factor )
-#     #print out
-#     #print out
-#     return N.array(out)
 
 def makeMonteCarloRealisations(spectrain):
     """Take a set of spectra, and make new ones based on a monte carlo randomisation."""
@@ -316,7 +293,7 @@ def makeMonteCarloRealisations(spectrain):
 def calculateMedianErrors(resultlist):
     """Take a set of deprojected spectra, and make medians and errors."""
 
-    print "Collating results"
+    print("Collating results")
 
     # convert to numarray and sort spectra on the realisation axis
     resultarray = N.array(resultlist)
@@ -338,7 +315,7 @@ def writeSpectrum(outfile, spectrum, errors, grouping,
 
     numchans = len(grouping)
 
-    channelcol = pyfits.Column(
+    channelcol = fits.Column(
         name='CHANNEL', format='J', array=N.arange(1, numchans+1))
     # groups are 1 where they start and -1 as they continue
     groups = N.zeros(numchans)
@@ -352,8 +329,8 @@ def writeSpectrum(outfile, spectrum, errors, grouping,
         else:
             groups[chan] = -1
 
-    groupcol = pyfits.Column(name='GROUPING', format='I', array=groups)
-    qualitycol = pyfits.Column(
+    groupcol = fits.Column(name='GROUPING', format='I', array=groups)
+    qualitycol = fits.Column(
         name='QUALITY', format='I', array=N.zeros(numchans))
 
     # "ungroup" rates into separate channels so that they become spectra again
@@ -362,7 +339,7 @@ def writeSpectrum(outfile, spectrum, errors, grouping,
     rate = N.zeros(numchans)
     rateerr = N.zeros(numchans)
     lastgroup = None
-    for chan in xrange(numchans):
+    for chan in range(numchans):
         group = grouping[chan]
         if lastgroup != group:
             rate[chan] = spectrum[group]
@@ -373,11 +350,11 @@ def writeSpectrum(outfile, spectrum, errors, grouping,
         # added **3 here: FIXME
         #rateerr[chan] = errors[group] / N.sqrt(grpnumchans[group])
 
-    ratecol = pyfits.Column(name='RATE', format='E', array=rate)
-    rateerrcol = pyfits.Column(name='STAT_ERR', format='E', array=rateerr)
+    ratecol = fits.Column(name='RATE', format='E', array=rate)
+    rateerrcol = fits.Column(name='STAT_ERR', format='E', array=rateerr)
 
-    primaryhdu = pyfits.PrimaryHDU()
-    spechdu = pyfits.BinTableHDU.from_columns([
+    primaryhdu = fits.PrimaryHDU()
+    spechdu = fits.BinTableHDU.from_columns([
         channelcol, ratecol, rateerrcol, qualitycol, groupcol])
     spechdr = spechdu.header
 
@@ -395,26 +372,26 @@ def writeSpectrum(outfile, spectrum, errors, grouping,
 
         spechdr[k] = v
 
-    hdulist = pyfits.HDUList([primaryhdu, spechdu])
+    hdulist = fits.HDUList([primaryhdu, spechdu])
     hdulist.writeto(outfile)
 
 def doDeprojection(spectra, iterations, minspec, outprefix, outsuffix):
     """Make so many iterations to deproject spectra."""
 
-    print "Doing Monte Carlo deprojection (%i iterations)" % iterations
+    print("Doing Monte Carlo deprojection (%i iterations)" % iterations)
     results = []
-    for i in xrange(iterations):
+    for i in range(iterations):
         if i % 100 == 0:
-            print i
+            print(i)
         copies = makeMonteCarloRealisations(spectra)
         results.append( deprojectSpectra(copies) )
-    print "Done"
+    print("Done")
 
-    print "Writing output files"
+    print("Writing output files")
 
     specs, errors = calculateMedianErrors(results)
     num = minspec
-    for spec, err, inspecfile in itertools.izip(specs, errors, spectra):
+    for spec, err, inspecfile in zip(specs, errors, spectra):
         writeSpectrum(
             '%s%i%s' % (outprefix, num, outsuffix),
             spec, err, spectra[0].grouping,
@@ -424,7 +401,7 @@ def doDeprojection(spectra, iterations, minspec, outprefix, outsuffix):
 if __name__ == '__main__':
 
     if len(sys.argv) != 8:
-        print >>sys.stderr, "Usage: %s prefix suffix minspec numspecs minradius outprefix outsuffix" % sys.argv[0]
+        print("Usage: %s prefix suffix minspec numspecs minradius outprefix outsuffix" % sys.argv[0], file=sys.stderr)
         sys.exit(1)
 
     prefix = sys.argv[1]
